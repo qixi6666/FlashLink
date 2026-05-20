@@ -37,6 +37,20 @@ type VisitLog struct {
 	Referer   string
 }
 
+type RefererStat struct {
+	Referer string `json:"referer"`
+	PV      uint64 `json:"pv"`
+}
+
+type LinkStats struct {
+	Code      string        `json:"code"`
+	PV        uint64        `json:"pv"`
+	UV        uint64        `json:"uv"`
+	TodayPV   uint64        `json:"today_pv"`
+	Referers  []RefererStat `json:"referers"`
+	UpdatedAt time.Time     `json:"updated_at"`
+}
+
 type DailyStat struct {
 	Code      string
 	StatDate  time.Time

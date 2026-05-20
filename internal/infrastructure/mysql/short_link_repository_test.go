@@ -67,6 +67,50 @@ func TestShortLinkRepositoryCreateRejectsInvalidCode(t *testing.T) {
 	}
 }
 
+func TestGroupShortLinksByShard(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC)
+	items := []link.ShortLink{
+		{
+			ID:        30,
+			Code:      link.NewShortCode(30),
+			LongURL:   "https://example.com/30",
+			Status:    link.ShortLinkStatusActive,
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		{
+			ID:        31,
+			Code:      link.NewShortCode(31),
+			LongURL:   "https://example.com/31",
+			Status:    link.ShortLinkStatusActive,
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+	}
+
+	groups, err := groupShortLinksByShard(items)
+	if err != nil {
+		t.Fatalf("groupShortLinksByShard returned error: %v", err)
+	}
+	if len(groups[14]) != 1 || groups[14][0].ID != 30 {
+		t.Fatalf("shard 14 = %#v, want id 30", groups[14])
+	}
+	if len(groups[15]) != 1 || groups[15][0].ID != 31 {
+		t.Fatalf("shard 15 = %#v, want id 31", groups[15])
+	}
+}
+
+func TestGroupShortLinksByShardRejectsInvalidCode(t *testing.T) {
+	t.Parallel()
+
+	_, err := groupShortLinksByShard([]link.ShortLink{{ID: 1, Code: "bad-code"}})
+	if !errors.Is(err, link.ErrInvalidCode) {
+		t.Fatalf("error = %v, want ErrInvalidCode", err)
+	}
+}
+
 func TestShortLinkRepositoryFindByCode(t *testing.T) {
 	t.Parallel()
 

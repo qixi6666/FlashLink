@@ -39,3 +39,8 @@ type DailyStatRecord struct {
 func (DailyStatRecord) TableName() string {
 	return "link_stat_daily"
 }
+
+type refererStatRecord struct {
+	Referer string `gorm:"column:referer"`
+	PV      uint64 `gorm:"column:pv"`
+}
