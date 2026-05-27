@@ -8,6 +8,8 @@ FlashLink 是一个 Go 实现的高并发短链接服务，覆盖短链生成、
 - `GET /:code` 302 重定向
 - `GET /api/links/:code/stats` 查询 PV、UV、今日访问量和 Referer 来源
 - `LocalCache + Redis + MySQL` 多级读取
+- Gin 网关可通过 gRPC 调用内部 `linksvc`、`redirectsvc`、`statsvc`
+- etcd 服务注册发现
 - `singleflight` 合并热点短码回源
 - Redis Set 过滤不存在短码，降低缓存穿透
 - 环形缓冲区 + 对象池 + worker 批量写入短链
@@ -41,6 +43,21 @@ docker compose up mysql redis etcd
 export MYSQL_DSN='flashlink:flashlink@tcp(127.0.0.1:3306)/flashlink?charset=utf8mb4&parseTime=True&loc=Local'
 export REDIS_ADDR='127.0.0.1:6379'
 export SHORT_LINK_DOMAIN='http://127.0.0.1:8080'
+go run ./cmd/gateway
+```
+
+如果要启用 gRPC 内部服务链路，先分别在不同终端启动服务：
+
+```bash
+export ETCD_ENDPOINTS='127.0.0.1:2379'
+export MYSQL_DSN='flashlink:flashlink@tcp(127.0.0.1:3306)/flashlink?charset=utf8mb4&parseTime=True&loc=Local'
+export REDIS_ADDR='127.0.0.1:6379'
+
+go run ./cmd/linksvc
+go run ./cmd/redirectsvc
+go run ./cmd/statsvc
+
+export GATEWAY_USE_GRPC=true
 go run ./cmd/gateway
 ```
 

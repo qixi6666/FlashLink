@@ -27,6 +27,12 @@ type Redis struct {
 	WriteTimeout time.Duration
 }
 
+type Etcd struct {
+	Endpoints   []string
+	DialTimeout time.Duration
+	LeaseTTL    int64
+}
+
 type ShortLink struct {
 	Domain string
 }
@@ -71,10 +77,43 @@ func LoadRedis() Redis {
 	}
 }
 
+func LoadEtcd() Etcd {
+	raw := getenv("ETCD_ENDPOINTS", "")
+	var endpoints []string
+	for _, endpoint := range strings.Split(raw, ",") {
+		endpoint = strings.TrimSpace(endpoint)
+		if endpoint != "" {
+			endpoints = append(endpoints, endpoint)
+		}
+	}
+
+	return Etcd{
+		Endpoints:   endpoints,
+		DialTimeout: getenvDuration("ETCD_DIAL_TIMEOUT", 3*time.Second),
+		LeaseTTL:    int64(getenvInt("ETCD_LEASE_TTL", 10)),
+	}
+}
+
 func LoadShortLink() ShortLink {
 	return ShortLink{
 		Domain: getenv("SHORT_LINK_DOMAIN", "http://127.0.0.1:8080"),
 	}
+}
+
+func LoadAdvertiseAddr(serviceName string, listenAddr string) string {
+	envKey := strings.ToUpper(serviceName) + "_ADVERTISE_ADDR"
+	if value := getenv(envKey, ""); value != "" {
+		return value
+	}
+	return normalizeAdvertiseAddr(listenAddr)
+}
+
+func normalizeAdvertiseAddr(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if strings.HasPrefix(addr, ":") {
+		return "127.0.0.1" + addr
+	}
+	return addr
 }
 
 func LoadCleanup() Cleanup {
@@ -85,6 +124,10 @@ func LoadCleanup() Cleanup {
 		StatRetention:  getenvDuration("CLEANUP_STAT_RETENTION", 180*24*time.Hour),
 		BatchSize:      getenvInt("CLEANUP_BATCH_SIZE", 1000),
 	}
+}
+
+func LoadGatewayUseGRPC() bool {
+	return getenvBool("GATEWAY_USE_GRPC", false)
 }
 
 func getenv(key string, fallback string) string {

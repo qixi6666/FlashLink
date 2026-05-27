@@ -16,9 +16,11 @@ import (
 	"github.com/jd/flashlink/internal/config"
 	"github.com/jd/flashlink/internal/domain/link"
 	"github.com/jd/flashlink/internal/infrastructure/cache"
+	infraetcd "github.com/jd/flashlink/internal/infrastructure/etcd"
 	"github.com/jd/flashlink/internal/infrastructure/filter"
 	"github.com/jd/flashlink/internal/infrastructure/mysql"
 	infraredis "github.com/jd/flashlink/internal/infrastructure/redis"
+	"github.com/jd/flashlink/internal/interfaces/grpcapi"
 	"github.com/jd/flashlink/internal/interfaces/httpapi"
 )
 
@@ -28,6 +30,13 @@ func main() {
 	cfg := config.LoadService("gateway", ":8080")
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	if config.LoadGatewayUseGRPC() {
+		if err := runGRPCGateway(ctx, cfg); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	mysqlCfg := config.LoadMySQL()
 	if mysqlCfg.DSN == "" {
@@ -119,5 +128,92 @@ func main() {
 	log.Printf("starting %s on %s", cfg.Name, cfg.Addr)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
+	}
+}
+
+func runGRPCGateway(ctx context.Context, cfg config.Service) error {
+	etcdCfg := config.LoadEtcd()
+	registry, err := infraetcd.Open(etcdCfg)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = registry.Close()
+	}()
+
+	linkAddr, err := discoverWithRetry(ctx, registry, grpcapi.ServiceLink)
+	if err != nil {
+		return err
+	}
+	redirectAddr, err := discoverWithRetry(ctx, registry, grpcapi.ServiceRedirect)
+	if err != nil {
+		return err
+	}
+	statsAddr, err := discoverWithRetry(ctx, registry, grpcapi.ServiceStats)
+	if err != nil {
+		return err
+	}
+
+	client, err := grpcapi.NewGatewayClient(ctx, linkAddr, redirectAddr, statsAddr)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = client.Close()
+	}()
+
+	srv := &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           httpapi.NewRouter(httpapi.RouterOptions{Links: client, Stats: client, Recorder: client}),
+		ReadHeaderTimeout: 3 * time.Second,
+	}
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("gateway shutdown failed: %v", err)
+		}
+	}()
+
+	log.Printf(
+		"starting %s on %s via grpc linksvc=%s redirectsvc=%s statsvc=%s",
+		cfg.Name,
+		cfg.Addr,
+		linkAddr,
+		redirectAddr,
+		statsAddr,
+	)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	return nil
+}
+
+type serviceDiscoverer interface {
+	Discover(ctx context.Context, serviceName string) (string, error)
+}
+
+func discoverWithRetry(ctx context.Context, registry serviceDiscoverer, serviceName string) (string, error) {
+	deadlineCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	var lastErr error
+	for {
+		addr, err := registry.Discover(deadlineCtx, serviceName)
+		if err == nil {
+			return addr, nil
+		}
+		lastErr = err
+
+		select {
+		case <-deadlineCtx.Done():
+			return "", lastErr
+		case <-ticker.C:
+		}
 	}
 }

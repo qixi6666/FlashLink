@@ -6,6 +6,8 @@ services:
       GATEWAY_ADDR: :8080
       MYSQL_DSN: flashlink:flashlink@tcp(mysql:3306)/flashlink?charset=utf8mb4&parseTime=True&loc=Local
       REDIS_ADDR: redis:6379
+      GATEWAY_USE_GRPC: "true"
+      ETCD_ENDPOINTS: etcd:2379
       REDIS_DB: 0
       REDIS_POOL_SIZE: 20
       REDIS_DIAL_TIMEOUT: 3s
@@ -20,11 +22,96 @@ services:
     ports:
       - "8080:8080"
     depends_on:
+      etcd:
+        condition: service_healthy
+      linksvc:
+        condition: service_started
+      redirectsvc:
+        condition: service_started
+      statsvc:
+        condition: service_started
+      worker:
+        condition: service_started
+
+  linksvc:
+    build: .
+    command: ["/app/linksvc"]
+    environment:
+      APP_ENV: local
+      LINKSVC_ADDR: :8081
+      LINKSVC_ADVERTISE_ADDR: linksvc:8081
+      MYSQL_DSN: flashlink:flashlink@tcp(mysql:3306)/flashlink?charset=utf8mb4&parseTime=True&loc=Local
+      REDIS_ADDR: redis:6379
+      REDIS_DB: 0
+      ETCD_ENDPOINTS: etcd:2379
+      SHORT_LINK_DOMAIN: http://127.0.0.1:8080
+    ports:
+      - "8081:8081"
+    depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
       etcd:
+        condition: service_healthy
+
+  redirectsvc:
+    build: .
+    command: ["/app/redirectsvc"]
+    environment:
+      APP_ENV: local
+      REDIRECTSVC_ADDR: :8082
+      REDIRECTSVC_ADVERTISE_ADDR: redirectsvc:8082
+      MYSQL_DSN: flashlink:flashlink@tcp(mysql:3306)/flashlink?charset=utf8mb4&parseTime=True&loc=Local
+      REDIS_ADDR: redis:6379
+      REDIS_DB: 0
+      ETCD_ENDPOINTS: etcd:2379
+      SHORT_LINK_DOMAIN: http://127.0.0.1:8080
+    ports:
+      - "8082:8082"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      etcd:
+        condition: service_healthy
+
+  statsvc:
+    build: .
+    command: ["/app/statsvc"]
+    environment:
+      APP_ENV: local
+      STATSVC_ADDR: :8083
+      STATSVC_ADVERTISE_ADDR: statsvc:8083
+      MYSQL_DSN: flashlink:flashlink@tcp(mysql:3306)/flashlink?charset=utf8mb4&parseTime=True&loc=Local
+      ETCD_ENDPOINTS: etcd:2379
+    ports:
+      - "8083:8083"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      etcd:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: ["/app/worker"]
+    environment:
+      APP_ENV: local
+      WORKER_ADDR: :8084
+      MYSQL_DSN: flashlink:flashlink@tcp(mysql:3306)/flashlink?charset=utf8mb4&parseTime=True&loc=Local
+      REDIS_ADDR: redis:6379
+      REDIS_DB: 0
+      CLEANUP_ENABLED: "true"
+      CLEANUP_INTERVAL: 24h
+      CLEANUP_VISIT_RETENTION: 720h
+      CLEANUP_STAT_RETENTION: 4320h
+      CLEANUP_BATCH_SIZE: 1000
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   mysql:

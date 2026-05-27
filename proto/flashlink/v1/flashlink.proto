@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package flashlink.v1;
+
+option go_package = "github.com/jd/flashlink/internal/interfaces/grpcapi/pb;pb";
+
+import "google/protobuf/timestamp.proto";
+
+service LinkService {
+  rpc CreateShortLink(CreateShortLinkRequest) returns (CreateShortLinkResponse);
+}
+
+service RedirectService {
+  rpc Resolve(ResolveRequest) returns (ResolveResponse);
+}
+
+service StatService {
+  rpc GetLinkStats(LinkStatsRequest) returns (LinkStatsResponse);
+  rpc RecordVisit(RecordVisitRequest) returns (RecordVisitResponse);
+}
+
+message ShortLink {
+  uint64 id = 1;
+  string code = 2;
+  string long_url = 3;
+  string domain = 4;
+  google.protobuf.Timestamp expire_at = 5;
+  uint32 status = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message CreateShortLinkRequest {
+  string long_url = 1;
+  string domain = 2;
+  google.protobuf.Timestamp expire_at = 3;
+}
+
+message CreateShortLinkResponse {
+  string code = 1;
+  string short_url = 2;
+  string long_url = 3;
+  google.protobuf.Timestamp expire_at = 4;
+}
+
+message ResolveRequest {
+  string code = 1;
+}
+
+message ResolveResponse {
+  ShortLink item = 1;
+}
+
+message LinkStatsRequest {
+  string code = 1;
+}
+
+message LinkStatsResponse {
+  string code = 1;
+  uint64 pv = 2;
+  uint64 uv = 3;
+  uint64 today_pv = 4;
+  repeated RefererStat referers = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+message RefererStat {
+  string referer = 1;
+  uint64 pv = 2;
+}
+
+message RecordVisitRequest {
+  string code = 1;
+  string ip = 2;
+  string user_agent = 3;
+  string referer = 4;
+  google.protobuf.Timestamp visited_at = 5;
+}
+
+message RecordVisitResponse {}

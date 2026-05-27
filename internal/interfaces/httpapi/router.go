@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -20,9 +21,22 @@ func init() {
 }
 
 type RouterOptions struct {
-	Links    *linkapp.Service
-	Stats    *statapp.Service
-	Recorder *statapp.Recorder
+	Links    LinkService
+	Stats    StatsService
+	Recorder VisitRecorder
+}
+
+type LinkService interface {
+	CreateShortLink(c context.Context, req linkapp.CreateRequest) (linkapp.CreateResponse, error)
+	Resolve(c context.Context, code string) (link.ShortLink, error)
+}
+
+type StatsService interface {
+	GetLinkStats(c context.Context, code string) (link.LinkStats, error)
+}
+
+type VisitRecorder interface {
+	Record(c context.Context, event statapp.VisitEvent) error
 }
 
 func NewRouter(options RouterOptions) *gin.Engine {
@@ -77,7 +91,7 @@ type createShortLinkRequest struct {
 	ExpireAt *time.Time `json:"expire_at"`
 }
 
-func createShortLink(service *linkapp.Service) gin.HandlerFunc {
+func createShortLink(service LinkService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req createShortLinkRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -99,7 +113,7 @@ func createShortLink(service *linkapp.Service) gin.HandlerFunc {
 	}
 }
 
-func getLinkStats(service *statapp.Service) gin.HandlerFunc {
+func getLinkStats(service StatsService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		stats, err := service.GetLinkStats(c.Request.Context(), strings.TrimSpace(c.Param("code")))
 		if err != nil {
@@ -111,7 +125,7 @@ func getLinkStats(service *statapp.Service) gin.HandlerFunc {
 	}
 }
 
-func redirect(service *linkapp.Service, recorder *statapp.Recorder) gin.HandlerFunc {
+func redirect(service LinkService, recorder VisitRecorder) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		code := strings.TrimSpace(c.Param("code"))
 		item, err := service.Resolve(c.Request.Context(), code)

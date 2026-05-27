@@ -17,7 +17,9 @@ fi
 echo "target=${base_url}/${code} requests=${requests} concurrency=${concurrency}"
 start_ns="$(date +%s%N)"
 
-seq "${requests}" | xargs -I{} -P "${concurrency}" curl -fsS -o /dev/null -L "${base_url}/${code}"
+results="$(
+  seq "${requests}" | xargs -I{} -P "${concurrency}" curl -s -o /dev/null -w '%{http_code}\n' "${base_url}/${code}" || true
+)"
 
 end_ns="$(date +%s%N)"
 elapsed_ms="$(( (end_ns - start_ns) / 1000000 ))"
@@ -26,5 +28,7 @@ if [[ "${elapsed_ms}" -eq 0 ]]; then
 fi
 
 qps="$(( requests * 1000 / elapsed_ms ))"
+success="$(printf '%s\n' "${results}" | awk '$1 == 302 { ok++ } END { print ok + 0 }')"
+failed="$(( requests - success ))"
 echo "elapsed_ms=${elapsed_ms} approx_qps=${qps}"
-
+echo "success=${success} failed=${failed} expected_status=302"
