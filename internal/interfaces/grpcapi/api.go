@@ -13,6 +13,7 @@ import (
 	"github.com/jd/flashlink/internal/domain/link"
 	"github.com/jd/flashlink/internal/interfaces/grpcapi/pb"
 	"google.golang.org/grpc"
+	_ "google.golang.org/grpc/balancer/roundrobin"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
@@ -154,6 +155,7 @@ func dial(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 		dialCtx,
 		addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
 		grpc.WithBlock(),
 	)
 }

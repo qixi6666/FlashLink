@@ -3,6 +3,7 @@ package etcd
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -79,17 +80,44 @@ func (r *Registry) Register(ctx context.Context, serviceName string, addr string
 }
 
 func (r *Registry) Discover(ctx context.Context, serviceName string) (string, error) {
-	resp, err := r.client.Get(ctx, servicePrefix+"/"+serviceName+"/", clientv3.WithPrefix())
+	addrs, err := r.List(ctx, serviceName)
 	if err != nil {
 		return "", err
 	}
-	if len(resp.Kvs) == 0 {
+	if len(addrs) == 0 {
 		return "", fmt.Errorf("service %q not found in etcd", serviceName)
 	}
-	return string(resp.Kvs[0].Value), nil
+	return addrs[0], nil
+}
+
+func (r *Registry) List(ctx context.Context, serviceName string) ([]string, error) {
+	resp, err := r.client.Get(ctx, servicePath(serviceName), clientv3.WithPrefix())
+	if err != nil {
+		return nil, err
+	}
+
+	addrs := make([]string, 0, len(resp.Kvs))
+	seen := make(map[string]struct{}, len(resp.Kvs))
+	for _, kv := range resp.Kvs {
+		addr := strings.TrimSpace(string(kv.Value))
+		if addr == "" {
+			continue
+		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		seen[addr] = struct{}{}
+		addrs = append(addrs, addr)
+	}
+	sort.Strings(addrs)
+	return addrs, nil
 }
 
 func serviceKey(serviceName string, addr string) string {
 	addr = strings.ReplaceAll(addr, "/", "_")
-	return fmt.Sprintf("%s/%s/%s", servicePrefix, serviceName, addr)
+	return servicePath(serviceName) + addr
+}
+
+func servicePath(serviceName string) string {
+	return fmt.Sprintf("%s/%s/", servicePrefix, serviceName)
 }

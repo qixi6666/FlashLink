@@ -36,7 +36,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	ids, err := link.NewSnowflake(2)
+	ids, err := link.NewSnowflake(config.LoadSnowflakeNodeID("statsvc", 2))
 	if err != nil {
 		log.Fatal(err)
 	}

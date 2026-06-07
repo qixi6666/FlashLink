@@ -11,8 +11,8 @@ FlashLink 是一个 Go 实现的高并发短链接服务，覆盖短链生成、
 - Gin 网关可通过 gRPC 调用内部 `linksvc`、`redirectsvc`、`statsvc`
 - etcd 服务注册发现
 - `singleflight` 合并热点短码回源
-- Redis Set 过滤不存在短码，降低缓存穿透
-- 环形缓冲区 + 对象池 + worker 批量写入短链
+- RedisBloom 布隆过滤器过滤不存在短码，降低缓存穿透
+- 创建短链同步写入 MySQL，成功后更新布隆过滤器并预热缓存
 - 访问日志异步批量写入
 - 定时清理过期短链、访问日志、统计数据并重建过滤器
 - JSON 请求日志和 `/debug/pprof`

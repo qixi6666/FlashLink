@@ -22,6 +22,7 @@ import (
 	infraredis "github.com/jd/flashlink/internal/infrastructure/redis"
 	"github.com/jd/flashlink/internal/interfaces/grpcapi"
 	"github.com/jd/flashlink/internal/interfaces/httpapi"
+	"google.golang.org/grpc/resolver"
 )
 
 func main() {
@@ -58,30 +59,27 @@ func main() {
 		_ = redisClient.Close()
 	}()
 
-	ids, err := link.NewSnowflake(1)
+	ids, err := link.NewSnowflake(config.LoadSnowflakeNodeID("gateway", 1))
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	shortLinkCfg := config.LoadShortLink()
+	bloomCfg := config.LoadBloomFilter()
 	shortRepo := mysql.NewShortLinkRepository(db)
 	visitRepo := mysql.NewVisitRepository(db)
-	redisFilter := filter.NewRedisSet(redisClient)
+	redisFilter := filter.NewRedisBloom(redisClient, filter.RedisBloomOptions{
+		Key:       bloomCfg.Key,
+		Capacity:  bloomCfg.Capacity,
+		ErrorRate: bloomCfg.ErrorRate,
+	})
 	if err := redisFilter.Rebuild(ctx, shortRepo, 1000); err != nil {
 		log.Printf("rebuild redis filter failed: %v", err)
 	}
 	redisCache := cache.NewRedis(redisClient)
-	asyncWriter := linkapp.NewAsyncShortLinkWriter(ctx, linkapp.AsyncWriterOptions{
-		Repository:    shortRepo,
-		BatchWriter:   shortRepo,
-		QueueSize:     8192,
-		BatchSize:     256,
-		Workers:       4,
-		FlushInterval: 10 * time.Millisecond,
-	})
 
 	linkService := linkapp.New(linkapp.Options{
-		Repository: asyncWriter,
+		Repository: shortRepo,
 		IDs:        ids,
 		LocalCache: cache.NewLocalWithMaxEntries(10000),
 		RedisCache: redisCache,
@@ -122,7 +120,6 @@ func main() {
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			log.Printf("gateway shutdown failed: %v", err)
 		}
-		asyncWriter.Wait()
 	}()
 
 	log.Printf("starting %s on %s", cfg.Name, cfg.Addr)
@@ -140,21 +137,13 @@ func runGRPCGateway(ctx context.Context, cfg config.Service) error {
 	defer func() {
 		_ = registry.Close()
 	}()
+	resolver.Register(infraetcd.NewResolverBuilder(registry))
 
-	linkAddr, err := discoverWithRetry(ctx, registry, grpcapi.ServiceLink)
-	if err != nil {
-		return err
-	}
-	redirectAddr, err := discoverWithRetry(ctx, registry, grpcapi.ServiceRedirect)
-	if err != nil {
-		return err
-	}
-	statsAddr, err := discoverWithRetry(ctx, registry, grpcapi.ServiceStats)
-	if err != nil {
-		return err
-	}
+	linkTarget := infraetcd.ResolverTarget(grpcapi.ServiceLink)
+	redirectTarget := infraetcd.ResolverTarget(grpcapi.ServiceRedirect)
+	statsTarget := infraetcd.ResolverTarget(grpcapi.ServiceStats)
 
-	client, err := grpcapi.NewGatewayClient(ctx, linkAddr, redirectAddr, statsAddr)
+	client, err := grpcapi.NewGatewayClient(ctx, linkTarget, redirectTarget, statsTarget)
 	if err != nil {
 		return err
 	}
@@ -181,39 +170,12 @@ func runGRPCGateway(ctx context.Context, cfg config.Service) error {
 		"starting %s on %s via grpc linksvc=%s redirectsvc=%s statsvc=%s",
 		cfg.Name,
 		cfg.Addr,
-		linkAddr,
-		redirectAddr,
-		statsAddr,
+		linkTarget,
+		redirectTarget,
+		statsTarget,
 	)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
 	}
 	return nil
-}
-
-type serviceDiscoverer interface {
-	Discover(ctx context.Context, serviceName string) (string, error)
-}
-
-func discoverWithRetry(ctx context.Context, registry serviceDiscoverer, serviceName string) (string, error) {
-	deadlineCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	var lastErr error
-	for {
-		addr, err := registry.Discover(deadlineCtx, serviceName)
-		if err == nil {
-			return addr, nil
-		}
-		lastErr = err
-
-		select {
-		case <-deadlineCtx.Done():
-			return "", lastErr
-		case <-ticker.C:
-		}
-	}
 }

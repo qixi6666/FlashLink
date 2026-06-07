@@ -93,12 +93,12 @@ func (s *Service) CreateShortLink(ctx context.Context, req CreateRequest) (Creat
 	if err := s.repo.Create(ctx, item); err != nil {
 		return CreateResponse{}, err
 	}
-	s.setCaches(ctx, item)
 	if s.filter != nil {
 		if err := s.filter.Add(ctx, code); err != nil {
 			return CreateResponse{}, err
 		}
 	}
+	s.setCaches(ctx, item)
 
 	return CreateResponse{
 		Code:     code,

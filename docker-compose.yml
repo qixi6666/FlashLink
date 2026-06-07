@@ -4,6 +4,7 @@ services:
     environment:
       APP_ENV: local
       GATEWAY_ADDR: :8080
+      GATEWAY_NODE_ID: 1
       MYSQL_DSN: flashlink:flashlink@tcp(mysql:3306)/flashlink?charset=utf8mb4&parseTime=True&loc=Local
       REDIS_ADDR: redis:6379
       GATEWAY_USE_GRPC: "true"
@@ -40,6 +41,7 @@ services:
       APP_ENV: local
       LINKSVC_ADDR: :8081
       LINKSVC_ADVERTISE_ADDR: linksvc:8081
+      LINKSVC_NODE_ID: 1
       MYSQL_DSN: flashlink:flashlink@tcp(mysql:3306)/flashlink?charset=utf8mb4&parseTime=True&loc=Local
       REDIS_ADDR: redis:6379
       REDIS_DB: 0
@@ -84,6 +86,7 @@ services:
       APP_ENV: local
       STATSVC_ADDR: :8083
       STATSVC_ADVERTISE_ADDR: statsvc:8083
+      STATSVC_NODE_ID: 2
       MYSQL_DSN: flashlink:flashlink@tcp(mysql:3306)/flashlink?charset=utf8mb4&parseTime=True&loc=Local
       ETCD_ENDPOINTS: etcd:2379
     ports:
@@ -133,8 +136,8 @@ services:
       retries: 10
 
   redis:
-    image: redis:7.4-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    image: redis/redis-stack-server:7.4.0-v3
+    command: ["redis-stack-server", "--appendonly", "yes"]
     ports:
       - "6379:6379"
     volumes:

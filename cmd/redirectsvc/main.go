@@ -44,7 +44,12 @@ func main() {
 	}()
 
 	shortRepo := mysql.NewShortLinkRepository(db)
-	redisFilter := filter.NewRedisSet(redisClient)
+	bloomCfg := config.LoadBloomFilter()
+	redisFilter := filter.NewRedisBloom(redisClient, filter.RedisBloomOptions{
+		Key:       bloomCfg.Key,
+		Capacity:  bloomCfg.Capacity,
+		ErrorRate: bloomCfg.ErrorRate,
+	})
 	if err := redisFilter.Rebuild(ctx, shortRepo, 1000); err != nil {
 		log.Printf("rebuild redis filter failed: %v", err)
 	}

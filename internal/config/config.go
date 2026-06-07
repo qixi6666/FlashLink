@@ -45,6 +45,12 @@ type Cleanup struct {
 	BatchSize      int
 }
 
+type BloomFilter struct {
+	Key       string
+	Capacity  uint64
+	ErrorRate float64
+}
+
 func LoadService(name string, defaultAddr string) Service {
 	envKey := strings.ToUpper(name) + "_ADDR"
 	addr := getenv(envKey, "")
@@ -100,6 +106,11 @@ func LoadShortLink() ShortLink {
 	}
 }
 
+func LoadSnowflakeNodeID(serviceName string, fallback int64) int64 {
+	envKey := strings.ToUpper(serviceName) + "_NODE_ID"
+	return int64(getenvInt(envKey, int(fallback)))
+}
+
 func LoadAdvertiseAddr(serviceName string, listenAddr string) string {
 	envKey := strings.ToUpper(serviceName) + "_ADVERTISE_ADDR"
 	if value := getenv(envKey, ""); value != "" {
@@ -126,6 +137,24 @@ func LoadCleanup() Cleanup {
 	}
 }
 
+func LoadBloomFilter() BloomFilter {
+	capacity := getenvInt("BLOOM_FILTER_CAPACITY", 10_000_000)
+	if capacity <= 0 {
+		capacity = 10_000_000
+	}
+
+	errorRate := getenvFloat("BLOOM_FILTER_ERROR_RATE", 0.01)
+	if errorRate <= 0 || errorRate >= 1 {
+		errorRate = 0.01
+	}
+
+	return BloomFilter{
+		Key:       getenv("BLOOM_FILTER_KEY", "flashlink:filter:codes"),
+		Capacity:  uint64(capacity),
+		ErrorRate: errorRate,
+	}
+}
+
 func LoadGatewayUseGRPC() bool {
 	return getenvBool("GATEWAY_USE_GRPC", false)
 }
@@ -143,6 +172,18 @@ func getenvInt(key string, fallback int) int {
 		return fallback
 	}
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func getenvFloat(key string, fallback float64) float64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
 	if err != nil {
 		return fallback
 	}

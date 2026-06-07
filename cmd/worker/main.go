@@ -41,11 +41,16 @@ func main() {
 	}()
 
 	cleanupCfg := config.LoadCleanup()
+	bloomCfg := config.LoadBloomFilter()
 	cleanupService := cleanupapp.New(cleanupapp.Options{
-		Links:          mysql.NewShortLinkRepository(db),
-		Visits:         mysql.NewVisitRepository(db),
-		Cache:          cache.NewRedis(redisClient),
-		Filter:         filter.NewRedisSet(redisClient),
+		Links:  mysql.NewShortLinkRepository(db),
+		Visits: mysql.NewVisitRepository(db),
+		Cache:  cache.NewRedis(redisClient),
+		Filter: filter.NewRedisBloom(redisClient, filter.RedisBloomOptions{
+			Key:       bloomCfg.Key,
+			Capacity:  bloomCfg.Capacity,
+			ErrorRate: bloomCfg.ErrorRate,
+		}),
 		BatchSize:      cleanupCfg.BatchSize,
 		VisitRetention: cleanupCfg.VisitRetention,
 		StatRetention:  cleanupCfg.StatRetention,

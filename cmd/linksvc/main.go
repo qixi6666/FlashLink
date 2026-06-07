@@ -44,28 +44,24 @@ func main() {
 		_ = redisClient.Close()
 	}()
 
-	ids, err := link.NewSnowflake(1)
+	ids, err := link.NewSnowflake(config.LoadSnowflakeNodeID("linksvc", 1))
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	shortRepo := mysql.NewShortLinkRepository(db)
-	redisFilter := filter.NewRedisSet(redisClient)
+	bloomCfg := config.LoadBloomFilter()
+	redisFilter := filter.NewRedisBloom(redisClient, filter.RedisBloomOptions{
+		Key:       bloomCfg.Key,
+		Capacity:  bloomCfg.Capacity,
+		ErrorRate: bloomCfg.ErrorRate,
+	})
 	if err := redisFilter.Rebuild(ctx, shortRepo, 1000); err != nil {
 		log.Printf("rebuild redis filter failed: %v", err)
 	}
 
-	asyncWriter := linkapp.NewAsyncShortLinkWriter(ctx, linkapp.AsyncWriterOptions{
-		Repository:    shortRepo,
-		BatchWriter:   shortRepo,
-		QueueSize:     8192,
-		BatchSize:     256,
-		Workers:       4,
-		FlushInterval: 10 * time.Millisecond,
-	})
-
 	linkService := linkapp.New(linkapp.Options{
-		Repository: asyncWriter,
+		Repository: shortRepo,
 		IDs:        ids,
 		LocalCache: cache.NewLocalWithMaxEntries(10000),
 		RedisCache: cache.NewRedis(redisClient),
@@ -92,11 +88,6 @@ func main() {
 
 	server := grpcapi.NewServer()
 	grpcapi.RegisterLinkService(server, linkService)
-
-	go func() {
-		<-ctx.Done()
-		asyncWriter.Wait()
-	}()
 
 	log.Printf("starting %s grpc on %s advertise=%s", cfg.Name, cfg.Addr, advertiseAddr)
 	if err := grpcapi.Serve(ctx, server, listener); err != nil {
