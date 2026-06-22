@@ -8,7 +8,7 @@ FlashLink 是一个 Go 实现的高并发短链接服务，覆盖短链生成、
 - `GET /:code` 302 重定向
 - `GET /api/links/:code/stats` 查询 PV、UV、今日访问量和 Referer 来源
 - `LocalCache + Redis + MySQL` 多级读取
-- Gin 网关可通过 gRPC 调用内部 `linksvc`、`redirectsvc`、`statsvc`
+- Gin 网关通过 gRPC 调用内部 `linksvc`、`redirectsvc`、`statsvc`
 - etcd 服务注册发现
 - `singleflight` 合并热点短码回源
 - RedisBloom 布隆过滤器过滤不存在短码，降低缓存穿透
@@ -37,16 +37,7 @@ curl http://127.0.0.1:8080/healthz
 docker compose up mysql redis etcd
 ```
 
-再运行 gateway：
-
-```bash
-export MYSQL_DSN='flashlink:flashlink@tcp(127.0.0.1:3306)/flashlink?charset=utf8mb4&parseTime=True&loc=Local'
-export REDIS_ADDR='127.0.0.1:6379'
-export SHORT_LINK_DOMAIN='http://127.0.0.1:8080'
-go run ./cmd/gateway
-```
-
-如果要启用 gRPC 内部服务链路，先分别在不同终端启动服务：
+再分别在不同终端启动内部服务和 gateway：
 
 ```bash
 export ETCD_ENDPOINTS='127.0.0.1:2379'
@@ -57,7 +48,6 @@ go run ./cmd/linksvc
 go run ./cmd/redirectsvc
 go run ./cmd/statsvc
 
-export GATEWAY_USE_GRPC=true
 go run ./cmd/gateway
 ```
 
@@ -97,23 +87,19 @@ make bench
 bash scripts/smoke.sh
 ```
 
-重定向压测：
+混合读写压测：
 
 ```bash
-REQUESTS=10000 CONCURRENCY=100 bash scripts/bench_redirect.sh
+go run ./cmd/loadtest -base http://127.0.0.1:8080 -levels 50,100,200,300,500 -duration 20s -write-ratio 0.3
 ```
 
-写入压测：
+热点 key 上线压测：
 
 ```bash
-REQUESTS=10000 CONCURRENCY=100 bash scripts/bench_create.sh
+go run ./cmd/loadtest -base http://127.0.0.1:8080 -scenario hot-key -hot-keys 1 -levels 100,300,500,800,1000 -duration 30s -write-ratio 0.3
 ```
 
-无效短码请求压测：
-
-```bash
-REQUESTS=10000 CONCURRENCY=100 bash scripts/bench_invalid.sh
-```
+压测工具会同时创建短链和读取短链，并输出每个并发档位的总 QPS、写 QPS、读 QPS、成功率、p50、p95、p99 和最高稳定吞吐。历史压测结果记录在 [docs/loadtest-qps.md](docs/loadtest-qps.md)。
 
 本机基准测试参考：
 

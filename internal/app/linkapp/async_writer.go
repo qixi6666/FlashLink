@@ -27,7 +27,7 @@ type AsyncWriterOptions struct {
 type AsyncShortLinkWriter struct {
 	repo          link.ShortLinkRepository
 	batchWriter   link.ShortLinkBatchRepository
-	ring          *shortLinkRing
+	queue         chan link.ShortLink
 	batchSize     int
 	flushInterval time.Duration
 	pool          sync.Pool
@@ -54,8 +54,8 @@ func NewAsyncShortLinkWriter(ctx context.Context, options AsyncWriterOptions) *A
 
 	writer := &AsyncShortLinkWriter{
 		repo:          options.Repository,
-		batchWriter:   options.BatchWriter,
-		ring:          newShortLinkRing(queueSize),
+		batchWriter:   resolveBatchWriter(options),
+		queue:         make(chan link.ShortLink, queueSize),
 		batchSize:     batchSize,
 		flushInterval: flushInterval,
 	}
@@ -76,7 +76,12 @@ func (w *AsyncShortLinkWriter) Create(ctx context.Context, item link.ShortLink) 
 	if err := link.ValidateShortCode(item.Code); err != nil {
 		return err
 	}
-	return w.ring.Push(ctx, item)
+	select {
+	case w.queue <- item:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (w *AsyncShortLinkWriter) FindByCode(ctx context.Context, code string) (link.ShortLink, error) {
@@ -99,7 +104,7 @@ func (w *AsyncShortLinkWriter) run(ctx context.Context) {
 		batch := (*batchPtr)[:0]
 
 		var err error
-		batch, err = w.ring.PopBatch(ctx, batch, w.batchSize, w.flushInterval)
+		batch, err = w.popBatch(ctx, batch)
 		if err != nil {
 			w.drain(batch)
 			*batchPtr = batch[:0]
@@ -113,15 +118,51 @@ func (w *AsyncShortLinkWriter) run(ctx context.Context) {
 	}
 }
 
+func (w *AsyncShortLinkWriter) popBatch(ctx context.Context, batch []link.ShortLink) ([]link.ShortLink, error) {
+	select {
+	case item := <-w.queue:
+		batch = append(batch, item)
+	case <-ctx.Done():
+		return batch, ctx.Err()
+	}
+
+	if len(batch) >= w.batchSize {
+		return batch, nil
+	}
+
+	timer := time.NewTimer(w.flushInterval)
+	defer timer.Stop()
+
+	for len(batch) < w.batchSize {
+		select {
+		case item := <-w.queue:
+			batch = append(batch, item)
+		case <-timer.C:
+			return batch, nil
+		case <-ctx.Done():
+			return batch, ctx.Err()
+		}
+	}
+	return batch, nil
+}
+
 func (w *AsyncShortLinkWriter) drain(batch []link.ShortLink) {
 	if len(batch) > 0 {
 		w.flush(batch)
 	}
 
 	for {
-		batch = w.ring.TryPopBatch(batch[:0], w.batchSize)
-		if len(batch) == 0 {
-			return
+		batch = batch[:0]
+		for len(batch) < w.batchSize {
+			select {
+			case item := <-w.queue:
+				batch = append(batch, item)
+			default:
+				if len(batch) > 0 {
+					w.flush(batch)
+				}
+				return
+			}
 		}
 		w.flush(batch)
 	}
@@ -131,93 +172,21 @@ func (w *AsyncShortLinkWriter) flush(batch []link.ShortLink) {
 	if len(batch) == 0 {
 		return
 	}
-	_ = w.batchWriter.CreateBatch(context.Background(), batch)
+	if w.batchWriter != nil {
+		_ = w.batchWriter.CreateBatch(context.Background(), batch)
+		return
+	}
+	for _, item := range batch {
+		_ = w.repo.Create(context.Background(), item)
+	}
 }
 
-type shortLinkRing struct {
-	mu        sync.Mutex
-	items     []link.ShortLink
-	head      int
-	tail      int
-	slots     chan struct{}
-	available chan struct{}
-}
-
-func newShortLinkRing(capacity int) *shortLinkRing {
-	r := &shortLinkRing{
-		items:     make([]link.ShortLink, capacity),
-		slots:     make(chan struct{}, capacity),
-		available: make(chan struct{}, capacity),
+func resolveBatchWriter(options AsyncWriterOptions) link.ShortLinkBatchRepository {
+	if options.BatchWriter != nil {
+		return options.BatchWriter
 	}
-	for i := 0; i < capacity; i++ {
-		r.slots <- struct{}{}
+	if batchWriter, ok := options.Repository.(link.ShortLinkBatchRepository); ok {
+		return batchWriter
 	}
-	return r
-}
-
-func (r *shortLinkRing) Push(ctx context.Context, item link.ShortLink) error {
-	select {
-	case <-r.slots:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-
-	r.mu.Lock()
-	r.items[r.tail] = item
-	r.tail = (r.tail + 1) % len(r.items)
-	r.mu.Unlock()
-
-	r.available <- struct{}{}
 	return nil
-}
-
-func (r *shortLinkRing) PopBatch(ctx context.Context, dst []link.ShortLink, max int, wait time.Duration) ([]link.ShortLink, error) {
-	select {
-	case <-r.available:
-		dst = r.popAfterAvailable(dst)
-	case <-ctx.Done():
-		return dst, ctx.Err()
-	}
-
-	if len(dst) >= max {
-		return dst, nil
-	}
-
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-
-	for len(dst) < max {
-		select {
-		case <-r.available:
-			dst = r.popAfterAvailable(dst)
-		case <-timer.C:
-			return dst, nil
-		case <-ctx.Done():
-			return dst, ctx.Err()
-		}
-	}
-	return dst, nil
-}
-
-func (r *shortLinkRing) TryPopBatch(dst []link.ShortLink, max int) []link.ShortLink {
-	for len(dst) < max {
-		select {
-		case <-r.available:
-			dst = r.popAfterAvailable(dst)
-		default:
-			return dst
-		}
-	}
-	return dst
-}
-
-func (r *shortLinkRing) popAfterAvailable(dst []link.ShortLink) []link.ShortLink {
-	r.mu.Lock()
-	item := r.items[r.head]
-	r.items[r.head] = link.ShortLink{}
-	r.head = (r.head + 1) % len(r.items)
-	r.mu.Unlock()
-
-	r.slots <- struct{}{}
-	return append(dst, item)
 }

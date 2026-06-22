@@ -1,0 +1,16 @@
+ALTER TABLE short_link_00 DROP INDEX idx_short_link_00_expire_at, ADD INDEX idx_short_link_00_expire_at (expire_at, id);
+ALTER TABLE short_link_01 DROP INDEX idx_short_link_00_expire_at, ADD INDEX idx_short_link_00_expire_at (expire_at, id);
+ALTER TABLE short_link_02 DROP INDEX idx_short_link_00_expire_at, ADD INDEX idx_short_link_00_expire_at (expire_at, id);
+ALTER TABLE short_link_03 DROP INDEX idx_short_link_00_expire_at, ADD INDEX idx_short_link_00_expire_at (expire_at, id);
+ALTER TABLE short_link_04 DROP INDEX idx_short_link_00_expire_at, ADD INDEX idx_short_link_00_expire_at (expire_at, id);
+ALTER TABLE short_link_05 DROP INDEX idx_short_link_00_expire_at, ADD INDEX idx_short_link_00_expire_at (expire_at, id);
+ALTER TABLE short_link_06 DROP INDEX idx_short_link_00_expire_at, ADD INDEX idx_short_link_00_expire_at (expire_at, id);
+ALTER TABLE short_link_07 DROP INDEX idx_short_link_00_expire_at, ADD INDEX idx_short_link_00_expire_at (expire_at, id);
+ALTER TABLE short_link_08 DROP INDEX idx_short_link_00_expire_at, ADD INDEX idx_short_link_00_expire_at (expire_at, id);
+ALTER TABLE short_link_09 DROP INDEX idx_short_link_00_expire_at, ADD INDEX idx_short_link_00_expire_at (expire_at, id);
+ALTER TABLE short_link_10 DROP INDEX idx_short_link_00_expire_at, ADD INDEX idx_short_link_00_expire_at (expire_at, id);
+ALTER TABLE short_link_11 DROP INDEX idx_short_link_00_expire_at, ADD INDEX idx_short_link_00_expire_at (expire_at, id);
+ALTER TABLE short_link_12 DROP INDEX idx_short_link_00_expire_at, ADD INDEX idx_short_link_00_expire_at (expire_at, id);
+ALTER TABLE short_link_13 DROP INDEX idx_short_link_00_expire_at, ADD INDEX idx_short_link_00_expire_at (expire_at, id);
+ALTER TABLE short_link_14 DROP INDEX idx_short_link_00_expire_at, ADD INDEX idx_short_link_00_expire_at (expire_at, id);
+ALTER TABLE short_link_15 DROP INDEX idx_short_link_00_expire_at, ADD INDEX idx_short_link_00_expire_at (expire_at, id);

@@ -2,6 +2,7 @@ package linkapp
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -61,32 +62,19 @@ func TestAsyncShortLinkWriterDrainsOnCancel(t *testing.T) {
 	}
 }
 
-func TestShortLinkRingWrapsAround(t *testing.T) {
+func TestAsyncShortLinkWriterCreateWaitsWhenQueueFull(t *testing.T) {
 	t.Parallel()
 
-	ring := newShortLinkRing(2)
-	ctx := context.Background()
-
-	if err := ring.Push(ctx, activeLink(1)); err != nil {
-		t.Fatalf("Push returned error: %v", err)
+	writer := &AsyncShortLinkWriter{
+		queue: make(chan link.ShortLink, 1),
 	}
-	if err := ring.Push(ctx, activeLink(2)); err != nil {
-		t.Fatalf("Push returned error: %v", err)
-	}
+	writer.queue <- activeLink(1)
 
-	var batch []link.ShortLink
-	batch = ring.TryPopBatch(batch, 1)
-	if len(batch) != 1 || batch[0].ID != 1 {
-		t.Fatalf("first pop = %#v", batch)
-	}
-
-	if err := ring.Push(ctx, activeLink(3)); err != nil {
-		t.Fatalf("Push returned error: %v", err)
-	}
-
-	batch = ring.TryPopBatch(batch[:0], 2)
-	if len(batch) != 2 || batch[0].ID != 2 || batch[1].ID != 3 {
-		t.Fatalf("wrapped pop = %#v", batch)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	err := writer.Create(ctx, activeLink(2))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Create error = %v, want DeadlineExceeded", err)
 	}
 }
 

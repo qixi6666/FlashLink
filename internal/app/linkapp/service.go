@@ -2,6 +2,7 @@ package linkapp
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ type Service struct {
 	local     LinkCache
 	remote    LinkCache
 	filter    ExistenceFilter
+	cleaner   *LazyExpiredCleaner
 	domain    string
 	cacheTTL  time.Duration
 	now       func() time.Time
@@ -30,6 +32,7 @@ type Options struct {
 	LocalCache LinkCache
 	RedisCache LinkCache
 	Filter     ExistenceFilter
+	Cleaner    *LazyExpiredCleaner
 	Domain     string
 	CacheTTL   time.Duration
 }
@@ -59,6 +62,7 @@ func New(options Options) *Service {
 		local:    options.LocalCache,
 		remote:   options.RedisCache,
 		filter:   options.Filter,
+		cleaner:  options.Cleaner,
 		domain:   strings.TrimRight(options.Domain, "/"),
 		cacheTTL: cacheTTL,
 		now:      time.Now,
@@ -98,7 +102,7 @@ func (s *Service) CreateShortLink(ctx context.Context, req CreateRequest) (Creat
 			return CreateResponse{}, err
 		}
 	}
-	s.setCaches(ctx, item)
+	s.setCache(ctx, s.remote, item)
 
 	return CreateResponse{
 		Code:     code,
@@ -136,6 +140,9 @@ func (s *Service) Resolve(ctx context.Context, code string) (link.ShortLink, err
 
 		item, err := s.repo.FindActiveByCode(ctx, code)
 		if err != nil {
+			if errors.Is(err, link.ErrExpired) {
+				s.handleExpiredCode(ctx, code, s.now())
+			}
 			return link.ShortLink{}, err
 		}
 		s.setCaches(ctx, item)
@@ -159,7 +166,33 @@ func (s *Service) getCache(ctx context.Context, cache LinkCache, code string) (l
 	if item.IsActive(s.now()) {
 		return item, true, nil
 	}
+	if item.Code != "" {
+		s.deleteCaches(ctx, []string{item.Code})
+	}
 	return link.ShortLink{}, false, nil
+}
+
+func (s *Service) handleExpiredCode(ctx context.Context, code string, before time.Time) {
+	s.deleteCaches(ctx, []string{code})
+	if s.cleaner != nil {
+		_ = s.cleaner.Enqueue(code, before)
+	}
+}
+
+func (s *Service) deleteCaches(ctx context.Context, codes []string) {
+	s.deleteCache(ctx, s.local, codes)
+	s.deleteCache(ctx, s.remote, codes)
+}
+
+func (s *Service) deleteCache(ctx context.Context, cache LinkCache, codes []string) {
+	if cache == nil || len(codes) == 0 {
+		return
+	}
+	invalidator, ok := cache.(LinkCacheInvalidator)
+	if !ok {
+		return
+	}
+	_ = invalidator.Delete(ctx, codes)
 }
 
 func (s *Service) setCaches(ctx context.Context, item link.ShortLink) {
@@ -172,17 +205,25 @@ func (s *Service) setCache(ctx context.Context, cache LinkCache, item link.Short
 		return
 	}
 
+	ttl, ok := s.cacheTTLFor(item)
+	if !ok {
+		return
+	}
+	_ = cache.Set(ctx, item, ttl)
+}
+
+func (s *Service) cacheTTLFor(item link.ShortLink) (time.Duration, bool) {
 	ttl := s.cacheTTL
 	if item.ExpireAt != nil {
 		untilExpire := item.ExpireAt.Sub(s.now())
 		if untilExpire <= 0 {
-			return
+			return 0, false
 		}
 		if untilExpire < ttl {
 			ttl = untilExpire
 		}
 	}
-	_ = cache.Set(ctx, item, ttl)
+	return ttl, true
 }
 
 func isValidLongURL(raw string) bool {

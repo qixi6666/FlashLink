@@ -10,6 +10,7 @@ import (
 
 	"github.com/jd/flashlink/internal/app/linkapp"
 	"github.com/jd/flashlink/internal/config"
+	"github.com/jd/flashlink/internal/domain/link"
 	"github.com/jd/flashlink/internal/infrastructure/cache"
 	infraetcd "github.com/jd/flashlink/internal/infrastructure/etcd"
 	"github.com/jd/flashlink/internal/infrastructure/filter"
@@ -59,6 +60,7 @@ func main() {
 		LocalCache: cache.NewLocalWithMaxEntries(10000),
 		RedisCache: cache.NewRedis(redisClient),
 		Filter:     redisFilter,
+		Cleaner:    newLazyExpiredCleaner(ctx, shortRepo),
 		Domain:     config.LoadShortLink().Domain,
 	})
 
@@ -87,4 +89,13 @@ func main() {
 	if err := grpcapi.Serve(ctx, server, listener); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func newLazyExpiredCleaner(ctx context.Context, repo link.LazyExpiredShortLinkRepository) *linkapp.LazyExpiredCleaner {
+	cleaner := linkapp.NewLazyExpiredCleaner(linkapp.LazyExpiredCleanerOptions{
+		Repository: repo,
+		Logger:     log.Default(),
+	})
+	cleaner.Start(ctx)
+	return cleaner
 }

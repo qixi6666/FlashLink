@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS short_link_00 (
   updated_at DATETIME(3) NOT NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uk_short_link_00_code (code),
-  KEY idx_short_link_00_expire_at (expire_at),
+  KEY idx_short_link_00_expire_at (expire_at, id),
   KEY idx_short_link_00_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 

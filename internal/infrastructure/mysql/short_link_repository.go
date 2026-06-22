@@ -121,42 +121,39 @@ func (r *ShortLinkRepository) ListActiveCodes(ctx context.Context, batchSize int
 			return err
 		}
 
-		rows, err := r.db.WithContext(ctx).
-			Table(tableName).
-			Select("code").
-			Where("status = ? AND (expire_at IS NULL OR expire_at > ?)", uint8(link.ShortLinkStatusActive), now).
-			Order("id ASC").
-			Rows()
-		if err != nil {
-			return err
-		}
+		var lastID uint64
+		for {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 
-		batch := make([]string, 0, batchSize)
-		for rows.Next() {
-			var code string
-			if err := rows.Scan(&code); err != nil {
-				_ = rows.Close()
+			var rows []activeCodeRow
+			if err := r.db.WithContext(ctx).
+				Table(tableName).
+				Select("id, code").
+				Where("id > ? AND status = ? AND (expire_at IS NULL OR expire_at > ?)", lastID, uint8(link.ShortLinkStatusActive), now).
+				Order("id ASC").
+				Limit(batchSize).
+				Find(&rows).
+				Error; err != nil {
 				return err
 			}
-			batch = append(batch, code)
-			if len(batch) >= batchSize {
-				if err := handle(batch); err != nil {
-					_ = rows.Close()
-					return err
-				}
-				batch = batch[:0]
+
+			if len(rows) == 0 {
+				break
 			}
-		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		if len(batch) > 0 {
-			if err := handle(batch); err != nil {
+
+			codes := make([]string, 0, len(rows))
+			for _, row := range rows {
+				codes = append(codes, row.Code)
+			}
+			if err := handle(codes); err != nil {
 				return err
+			}
+
+			lastID = rows[len(rows)-1].ID
+			if len(rows) < batchSize {
+				break
 			}
 		}
 	}
@@ -176,23 +173,38 @@ func (r *ShortLinkRepository) DeleteExpired(ctx context.Context, before time.Tim
 			return total, err
 		}
 
+		var cursorExpireAt time.Time
+		var cursorID uint64
 		for {
-			var codes []string
-			err := r.db.WithContext(ctx).
-				Table(tableName).
-				Select("code").
-				Where("expire_at IS NOT NULL AND expire_at <= ?", before).
-				Order("id ASC").
-				Limit(batchSize).
-				Pluck("code", &codes).
-				Error
-			if err != nil {
+			if err := ctx.Err(); err != nil {
 				return total, err
 			}
-			if len(codes) == 0 {
+
+			var rows []expiredCodeRow
+			query := r.db.WithContext(ctx).
+				Table(tableName).
+				Select("id, code, expire_at").
+				Where("expire_at IS NOT NULL AND expire_at <= ?", before)
+			if !cursorExpireAt.IsZero() {
+				query = query.Where("(expire_at > ? OR (expire_at = ? AND id > ?))", cursorExpireAt, cursorExpireAt, cursorID)
+			}
+			if err := query.
+				Order("expire_at ASC, id ASC").
+				Limit(batchSize).
+				Find(&rows).
+				Error; err != nil {
+				return total, err
+			}
+			if len(rows) == 0 {
 				break
 			}
 
+			ids := make([]uint64, 0, len(rows))
+			codes := make([]string, 0, len(rows))
+			for _, row := range rows {
+				ids = append(ids, row.ID)
+				codes = append(codes, row.Code)
+			}
 			if handleCodes != nil {
 				if err := handleCodes(codes); err != nil {
 					return total, err
@@ -201,20 +213,55 @@ func (r *ShortLinkRepository) DeleteExpired(ctx context.Context, before time.Tim
 
 			result := r.db.WithContext(ctx).
 				Table(tableName).
-				Where("code IN ?", codes).
+				Where("id IN ?", ids).
 				Delete(&ShortLinkRecord{})
 			if result.Error != nil {
 				return total, result.Error
 			}
 			total += result.RowsAffected
 
-			if len(codes) < batchSize {
+			last := rows[len(rows)-1]
+			cursorExpireAt = last.ExpireAt
+			cursorID = last.ID
+
+			if len(rows) < batchSize {
 				break
 			}
 		}
 	}
 
 	return total, nil
+}
+
+func (r *ShortLinkRepository) DeleteExpiredCode(ctx context.Context, code string, before time.Time) (bool, error) {
+	if err := link.ValidateShortCode(code); err != nil {
+		return false, err
+	}
+
+	tableName, err := link.ShardTableNameForCode(code)
+	if err != nil {
+		return false, err
+	}
+
+	result := r.db.WithContext(ctx).
+		Table(tableName).
+		Where("code = ? AND expire_at IS NOT NULL AND expire_at <= ?", code, before).
+		Delete(&ShortLinkRecord{})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+type activeCodeRow struct {
+	ID   uint64 `gorm:"column:id"`
+	Code string `gorm:"column:code"`
+}
+
+type expiredCodeRow struct {
+	ID       uint64    `gorm:"column:id"`
+	Code     string    `gorm:"column:code"`
+	ExpireAt time.Time `gorm:"column:expire_at"`
 }
 
 func shortLinkToRecord(item link.ShortLink) ShortLinkRecord {

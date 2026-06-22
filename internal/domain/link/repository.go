@@ -23,6 +23,10 @@ type ExpiredShortLinkRepository interface {
 	DeleteExpired(ctx context.Context, before time.Time, batchSize int, handleCodes func([]string) error) (int64, error)
 }
 
+type LazyExpiredShortLinkRepository interface {
+	DeleteExpiredCode(ctx context.Context, code string, before time.Time) (bool, error)
+}
+
 type VisitLogRepository interface {
 	CreateBatch(ctx context.Context, visits []VisitLog) error
 }

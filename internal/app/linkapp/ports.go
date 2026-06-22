@@ -16,6 +16,10 @@ type LinkCache interface {
 	Set(ctx context.Context, item link.ShortLink, ttl time.Duration) error
 }
 
+type LinkCacheInvalidator interface {
+	Delete(ctx context.Context, codes []string) error
+}
+
 type ExistenceFilter interface {
 	Add(ctx context.Context, code string) error
 	MightContain(ctx context.Context, code string) (bool, error)
